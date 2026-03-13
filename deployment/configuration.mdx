@@ -1,0 +1,487 @@
+---
+title: 'Configuration Reference'
+description: 'Complete environment variable reference for MarkItDown API'
+icon: 'sliders'
+---
+
+## Overview
+
+MarkItDown API is configured entirely through environment variables. This page documents all available configuration options, their defaults, and usage examples.
+
+## Environment File
+
+Create a `.env` file in your project root:
+
+```bash .env.example
+# -------------------------------------------------------
+# MarkItDown Backend — Environment Variables
+# -------------------------------------------------------
+# Copy this file to .env and fill in your values.
+
+# Optional: OpenAI API key for AI-enhanced image OCR.
+# Without this, all text-based formats (PDF, DOCX, XLSX, etc.)
+# still convert perfectly. Only image description is skipped.
+OPENAI_API_KEY=
+
+# Comma-separated list of allowed frontend origins.
+# In Azure: set this to your frontend URL, e.g. https://my-app.azurestaticapps.net
+CORS_ORIGINS=http://localhost:5173
+
+# Maximum file upload size in megabytes (default: 50)
+MAX_UPLOAD_MB=50
+
+# --- Azure Container Registry (for docker-compose deploy) ---
+# Your ACR name (without .azurecr.io)
+# ACR_REGISTRY=myregistry
+# Image tag to deploy
+# IMAGE_TAG=latest
+```
+
+## Core Configuration
+
+### CORS_ORIGINS
+
+<ParamField path="CORS_ORIGINS" type="string" default="http://localhost:5173" required>
+  Comma-separated list of allowed frontend origins for Cross-Origin Resource Sharing (CORS).
+  
+  **Usage in code** (`app/config.py:10-12`):
+  ```python
+  _raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+  CORS_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",")]
+  ```
+  
+  **Examples:**
+  
+  <CodeGroup>
+  ```bash Development
+  CORS_ORIGINS=http://localhost:5173
+  ```
+  
+  ```bash Production (Single Origin)
+  CORS_ORIGINS=https://myapp.com
+  ```
+  
+  ```bash Production (Multiple Origins)
+  CORS_ORIGINS=https://myapp.com,https://app.myapp.com,https://staging.myapp.com
+  ```
+  
+  ```bash Azure Static Web Apps
+  CORS_ORIGINS=https://my-app.azurestaticapps.net
+  ```
+  </CodeGroup>
+  
+  <Warning>
+    Do not use `*` (wildcard) in production. Always specify exact origins for security.
+  </Warning>
+</ParamField>
+
+### MAX_UPLOAD_MB
+
+<ParamField path="MAX_UPLOAD_MB" type="integer" default="50">
+  Maximum file upload size in megabytes. This limits the size of files that can be uploaded for conversion.
+  
+  **Usage in code** (`app/config.py:14-16`):
+  ```python
+  MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
+  MAX_UPLOAD_BYTES: int = MAX_UPLOAD_MB * 1024 * 1024
+  ```
+  
+  **Examples:**
+  
+  <CodeGroup>
+  ```bash Default (50MB)
+  MAX_UPLOAD_MB=50
+  ```
+  
+  ```bash Large Files (100MB)
+  MAX_UPLOAD_MB=100
+  ```
+  
+  ```bash Small Files (10MB)
+  MAX_UPLOAD_MB=10
+  ```
+  
+  ```bash Very Large Files (500MB)
+  MAX_UPLOAD_MB=500
+  ```
+  </CodeGroup>
+  
+  <Info>
+    Consider your hosting platform's limits when setting this value. Azure Container Apps and most cloud providers have their own upload size restrictions.
+  </Info>
+  
+  **Performance Impact:**
+  - Larger files consume more memory during processing
+  - Increase container memory allocation for values above 100MB
+  - Processing time increases linearly with file size
+</ParamField>
+
+## AI Features
+
+### OPENAI_API_KEY
+
+<ParamField path="OPENAI_API_KEY" type="string" optional>
+  OpenAI API key for AI-enhanced image OCR and description. This is **optional** — all text-based format conversions (PDF, DOCX, XLSX, PPTX, etc.) work perfectly without it.
+  
+  **Usage in code** (`app/config.py:7-8`):
+  ```python
+  OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+  ```
+  
+  **When is this needed?**
+  
+  The OpenAI API key is only used for:
+  - Image description generation
+  - OCR on image files (PNG, JPG, etc.)
+  - Enhanced image extraction from PDFs
+  
+  **What works without it?**
+  
+  All these conversions work perfectly without an OpenAI API key:
+  - PDF to Markdown
+  - DOCX to Markdown
+  - XLSX to Markdown
+  - PPTX to Markdown
+  - HTML to Markdown
+  - Markdown to DOCX/PPTX/HTML
+  
+  **Examples:**
+  
+  <CodeGroup>
+  ```bash Development (No AI)
+  # Leave empty or omit entirely
+  OPENAI_API_KEY=
+  ```
+  
+  ```bash Production (With AI)
+  OPENAI_API_KEY=sk-proj-abc123...
+  ```
+  
+  ```bash Docker Compose
+  OPENAI_API_KEY=${OPENAI_API_KEY:-}
+  ```
+  </CodeGroup>
+  
+  <Warning>
+    Never commit your OpenAI API key to version control. Use secrets management in production.
+  </Warning>
+  
+  **Security Best Practices:**
+  
+  <Tabs>
+    <Tab title="Azure Container Apps">
+      Store as a secret:
+      ```bash
+      az containerapp secret set \
+        --name markitdown-api \
+        --resource-group markitdown-rg \
+        --secrets openai-key="sk-..."
+      
+      az containerapp update \
+        --name markitdown-api \
+        --resource-group markitdown-rg \
+        --set-env-vars OPENAI_API_KEY=secretref:openai-key
+      ```
+    </Tab>
+    
+    <Tab title="Docker">
+      Use environment file:
+      ```bash
+      # .env (git-ignored)
+      OPENAI_API_KEY=sk-...
+      
+      # docker-compose.yml
+      services:
+        api:
+          env_file: .env
+      ```
+    </Tab>
+    
+    <Tab title="Kubernetes">
+      Use Kubernetes secrets:
+      ```bash
+      kubectl create secret generic markitdown-secrets \
+        --from-literal=openai-api-key=sk-...
+      
+      # Reference in deployment
+      env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: markitdown-secrets
+              key: openai-api-key
+      ```
+    </Tab>
+  </Tabs>
+</ParamField>
+
+## Azure Deployment Variables
+
+These variables are used when deploying with Docker Compose to Azure Container Registry:
+
+### ACR_REGISTRY
+
+<ParamField path="ACR_REGISTRY" type="string" optional>
+  Your Azure Container Registry name (without `.azurecr.io` suffix).
+  
+  **Usage:**
+  
+  Referenced in `docker-compose.yml:6`:
+  ```yaml
+  image: ${ACR_REGISTRY}.azurecr.io/markitdown-api:${IMAGE_TAG:-latest}
+  ```
+  
+  **Example:**
+  ```bash
+  ACR_REGISTRY=markitdownacr
+  ```
+  
+  This resolves to: `markitdownacr.azurecr.io/markitdown-api:latest`
+</ParamField>
+
+### IMAGE_TAG
+
+<ParamField path="IMAGE_TAG" type="string" default="latest" optional>
+  Docker image tag to deploy from your Azure Container Registry.
+  
+  **Usage:**
+  
+  Referenced in `docker-compose.yml:6`:
+  ```yaml
+  image: ${ACR_REGISTRY}.azurecr.io/markitdown-api:${IMAGE_TAG:-latest}
+  ```
+  
+  **Examples:**
+  
+  <CodeGroup>
+  ```bash Latest
+  IMAGE_TAG=latest
+  ```
+  
+  ```bash Version Tag
+  IMAGE_TAG=v1.0.0
+  ```
+  
+  ```bash Git Commit SHA
+  IMAGE_TAG=abc123f
+  ```
+  
+  ```bash Environment Tag
+  IMAGE_TAG=staging
+  ```
+  </CodeGroup>
+</ParamField>
+
+## Configuration Loading
+
+The application loads configuration on startup using `python-dotenv`:
+
+```python app/config.py
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# OpenAI — optional, only needed for AI-enhanced image OCR
+OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+
+# CORS origins — comma-separated in env
+_raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+CORS_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",")]
+
+# Max upload size in MB
+MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
+MAX_UPLOAD_BYTES: int = MAX_UPLOAD_MB * 1024 * 1024
+
+# Paths
+BASE_DIR = Path(__file__).parent
+TEMPLATES_DIR = BASE_DIR / "templates"
+TEMPLATES_DIR.mkdir(exist_ok=True)
+```
+
+## Application Usage
+
+CORS configuration is applied in `app/main.py:25-31`:
+
+```python
+from app.config import CORS_ORIGINS
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+## Configuration by Environment
+
+### Local Development
+
+```bash .env
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+MAX_UPLOAD_MB=50
+OPENAI_API_KEY=
+```
+
+### Docker Deployment
+
+```bash .env
+CORS_ORIGINS=https://myapp.com
+MAX_UPLOAD_MB=100
+OPENAI_API_KEY=sk-...
+```
+
+### Azure Container Apps
+
+```bash
+# Set via Azure CLI
+az containerapp update \
+  --name markitdown-api \
+  --resource-group markitdown-rg \
+  --env-vars \
+    CORS_ORIGINS="https://myapp.azurestaticapps.net" \
+    MAX_UPLOAD_MB=100 \
+    OPENAI_API_KEY=secretref:openai-key
+```
+
+### Kubernetes
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: markitdown-config
+data:
+  CORS_ORIGINS: "https://myapp.com"
+  MAX_UPLOAD_MB: "100"
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          envFrom:
+            - configMapRef:
+                name: markitdown-config
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: markitdown-secrets
+                  key: openai-api-key
+```
+
+## Health Check Endpoint
+
+The health endpoint at `GET /health` (defined in `app/main.py:37-39`) requires no configuration:
+
+```python
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+```
+
+Used by:
+- Docker health checks (`docker-compose.yml:16`)
+- Azure Container Apps liveness probes
+- Load balancers and monitoring systems
+
+## Validation and Defaults
+
+<AccordionGroup>
+  <Accordion title="Missing Environment Variables">
+    All environment variables have safe defaults:
+    - `CORS_ORIGINS`: Defaults to `http://localhost:5173`
+    - `MAX_UPLOAD_MB`: Defaults to `50`
+    - `OPENAI_API_KEY`: Defaults to `None` (optional)
+    
+    The application will start successfully even with no `.env` file.
+  </Accordion>
+
+  <Accordion title="Invalid Values">
+    - `MAX_UPLOAD_MB`: Must be a valid integer. Non-numeric values will cause startup failure.
+    - `CORS_ORIGINS`: Empty string results in no CORS origins being allowed.
+  </Accordion>
+
+  <Accordion title="Security Validation">
+    No built-in validation for sensitive values like API keys. Ensure:
+    - OpenAI API key starts with `sk-`
+    - CORS origins use HTTPS in production
+    - No wildcard (`*`) CORS origins in production
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### CORS Errors
+
+If you see CORS errors in the browser:
+
+1. Check your `CORS_ORIGINS` setting:
+   ```bash
+   # View current config in Docker
+   docker exec markitdown-api printenv CORS_ORIGINS
+   ```
+
+2. Ensure the origin matches exactly (including protocol and port):
+   ```bash
+   # Correct
+   CORS_ORIGINS=https://myapp.com
+   
+   # Wrong - missing protocol
+   CORS_ORIGINS=myapp.com
+   ```
+
+3. Check application logs:
+   ```bash
+   docker logs markitdown-api | grep CORS
+   ```
+
+### Upload Size Errors
+
+If uploads fail with size errors:
+
+1. Check the `MAX_UPLOAD_MB` setting
+2. Verify your reverse proxy/load balancer limits:
+   - Nginx: `client_max_body_size`
+   - Azure: Application Gateway settings
+3. Monitor memory usage during large uploads
+
+### API Key Issues
+
+If OpenAI features aren't working:
+
+1. Verify the key is set:
+   ```bash
+   docker exec markitdown-api printenv OPENAI_API_KEY
+   ```
+
+2. Check the key format (should start with `sk-`)
+3. Verify the key has sufficient quota and permissions
+4. Check application logs for API errors
+
+## Quick Reference Table
+
+| Variable | Type | Default | Required | Used For |
+|----------|------|---------|----------|----------|
+| `CORS_ORIGINS` | string | `http://localhost:5173` | Yes | CORS policy |
+| `MAX_UPLOAD_MB` | integer | `50` | No | Upload size limit |
+| `OPENAI_API_KEY` | string | `None` | No | AI image OCR |
+| `ACR_REGISTRY` | string | - | No | Azure deployment |
+| `IMAGE_TAG` | string | `latest` | No | Azure deployment |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Deployment" icon="docker" href="/deployment/docker">
+    Deploy with Docker and Docker Compose
+  </Card>
+  <Card title="Azure Deployment" icon="microsoft" href="/deployment/azure">
+    Deploy to Azure Container Apps
+  </Card>
+</CardGroup>

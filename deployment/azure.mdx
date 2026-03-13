@@ -1,0 +1,465 @@
+---
+title: 'Azure Container Apps Deployment'
+description: 'Deploy MarkItDown API to Azure Container Apps'
+icon: 'microsoft'
+---
+
+## Overview
+
+MarkItDown API is fully compatible with Azure Container Apps and follows Azure's best practices. The Docker image is specifically optimized for Azure deployment with non-root user execution and health check support.
+
+## Prerequisites
+
+- Azure subscription
+- Azure CLI installed and configured
+- Azure Container Registry (ACR) or Docker Hub account
+- Docker installed locally for building images
+
+## Deployment Architecture
+
+<CardGroup cols={2}>
+  <Card title="Azure Container Registry" icon="database">
+    Store your Docker images securely in ACR
+  </Card>
+  <Card title="Azure Container Apps" icon="server">
+    Run containerized applications with automatic scaling
+  </Card>
+  <Card title="Managed Identity" icon="shield">
+    Secure access to Azure resources
+  </Card>
+  <Card title="Environment Variables" icon="gear">
+    Centralized configuration management
+  </Card>
+</CardGroup>
+
+## Step-by-Step Deployment
+
+<Steps>
+  <Step title="Create Azure Container Registry">
+    ```bash
+    # Set variables
+    RESOURCE_GROUP="markitdown-rg"
+    LOCATION="eastus"
+    ACR_NAME="markitdownacr"  # Must be globally unique
+    
+    # Create resource group
+    az group create --name $RESOURCE_GROUP --location $LOCATION
+    
+    # Create container registry
+    az acr create \
+      --resource-group $RESOURCE_GROUP \
+      --name $ACR_NAME \
+      --sku Basic \
+      --admin-enabled true
+    ```
+  </Step>
+
+  <Step title="Build and Push Docker Image">
+    ```bash
+    # Login to ACR
+    az acr login --name $ACR_NAME
+    
+    # Build and push the image
+    az acr build \
+      --registry $ACR_NAME \
+      --image markitdown-api:latest \
+      --file Dockerfile \
+      .
+    ```
+    
+    Alternatively, build locally and push:
+    
+    ```bash
+    # Build locally
+    docker build -t $ACR_NAME.azurecr.io/markitdown-api:latest .
+    
+    # Push to ACR
+    docker push $ACR_NAME.azurecr.io/markitdown-api:latest
+    ```
+  </Step>
+
+  <Step title="Create Container Apps Environment">
+    ```bash
+    ENVIRONMENT="markitdown-env"
+    
+    az containerapp env create \
+      --name $ENVIRONMENT \
+      --resource-group $RESOURCE_GROUP \
+      --location $LOCATION
+    ```
+  </Step>
+
+  <Step title="Deploy Container App">
+    ```bash
+    APP_NAME="markitdown-api"
+    
+    # Get ACR credentials
+    ACR_USERNAME=$(az acr credential show --name $ACR_NAME --query username -o tsv)
+    ACR_PASSWORD=$(az acr credential show --name $ACR_NAME --query passwords[0].value -o tsv)
+    
+    # Create container app
+    az containerapp create \
+      --name $APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --environment $ENVIRONMENT \
+      --image $ACR_NAME.azurecr.io/markitdown-api:latest \
+      --registry-server $ACR_NAME.azurecr.io \
+      --registry-username $ACR_USERNAME \
+      --registry-password $ACR_PASSWORD \
+      --target-port 8000 \
+      --ingress external \
+      --min-replicas 1 \
+      --max-replicas 10 \
+      --cpu 1.0 \
+      --memory 2Gi \
+      --env-vars \
+        CORS_ORIGINS="https://your-frontend.azurestaticapps.net" \
+        MAX_UPLOAD_MB=50
+    ```
+  </Step>
+
+  <Step title="Configure Secrets (Optional)">
+    If you're using OpenAI API for image OCR:
+    
+    ```bash
+    # Add OpenAI API key as secret
+    az containerapp secret set \
+      --name $APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --secrets openai-key="your-openai-api-key"
+    
+    # Update app to use secret
+    az containerapp update \
+      --name $APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --set-env-vars OPENAI_API_KEY=secretref:openai-key
+    ```
+  </Step>
+
+  <Step title="Verify Deployment">
+    ```bash
+    # Get the application URL
+    APP_URL=$(az containerapp show \
+      --name $APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --query properties.configuration.ingress.fqdn -o tsv)
+    
+    # Test the health endpoint
+    curl https://$APP_URL/health
+    ```
+    
+    Expected response:
+    ```json
+    {"status": "ok"}
+    ```
+  </Step>
+</Steps>
+
+## Using Docker Compose with Azure
+
+You can use the provided `docker-compose.yml` with Azure by modifying it to use your ACR image:
+
+```yaml docker-compose.yml (Azure)
+services:
+  api:
+    # Comment out build for Azure deployment
+    # build: .
+    
+    # Use your ACR image
+    image: ${ACR_REGISTRY}.azurecr.io/markitdown-api:${IMAGE_TAG:-latest}
+    container_name: markitdown-api
+    ports:
+      - "8000:8000"
+    environment:
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-50}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+```
+
+Then set these environment variables in your `.env` file:
+
+```bash .env
+ACR_REGISTRY=markitdownacr
+IMAGE_TAG=latest
+CORS_ORIGINS=https://your-frontend.azurestaticapps.net
+MAX_UPLOAD_MB=50
+```
+
+## Azure-Specific Configuration
+
+### Non-Root User Requirement
+
+Azure Container Apps requires containers to run as non-root users. The MarkItDown Dockerfile already includes this:
+
+```dockerfile
+# Non-root user (required by Azure Container Apps)
+RUN adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+```
+
+### Health Probes
+
+Configure health probes for better reliability:
+
+```bash
+az containerapp update \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --health-probe-type liveness \
+  --health-probe-path /health \
+  --health-probe-interval 30 \
+  --health-probe-timeout 10 \
+  --health-probe-retries 3
+```
+
+### Auto-Scaling Rules
+
+Configure scaling based on HTTP requests:
+
+```bash
+az containerapp update \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --min-replicas 1 \
+  --max-replicas 10 \
+  --scale-rule-name http-scale \
+  --scale-rule-type http \
+  --scale-rule-http-concurrency 100
+```
+
+## Environment Variables for Azure
+
+See the [Configuration](/deployment/configuration) page for all available environment variables. Key settings for Azure:
+
+<ParamField path="CORS_ORIGINS" type="string" required>
+  Set to your Azure Static Web App or frontend URL:
+  ```
+  CORS_ORIGINS=https://your-app.azurestaticapps.net
+  ```
+</ParamField>
+
+<ParamField path="MAX_UPLOAD_MB" type="integer" default="50">
+  Consider Azure Container Apps limits when setting this value.
+</ParamField>
+
+<ParamField path="OPENAI_API_KEY" type="string">
+  Store as a secret in Azure Container Apps (see Step 5 above).
+</ParamField>
+
+## Continuous Deployment
+
+### Using GitHub Actions
+
+Create `.github/workflows/azure-deploy.yml`:
+
+```yaml
+name: Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+
+env:
+  ACR_NAME: markitdownacr
+  RESOURCE_GROUP: markitdown-rg
+  APP_NAME: markitdown-api
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Build and push to ACR
+        run: |
+          az acr build \
+            --registry $ACR_NAME \
+            --image markitdown-api:${{ github.sha }} \
+            --image markitdown-api:latest \
+            --file Dockerfile \
+            .
+      
+      - name: Update Container App
+        run: |
+          az containerapp update \
+            --name $APP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --image $ACR_NAME.azurecr.io/markitdown-api:${{ github.sha }}
+```
+
+### Using Azure DevOps
+
+Create an Azure Pipeline with similar build and deployment steps using Azure CLI tasks.
+
+## Monitoring and Logs
+
+### View Application Logs
+
+```bash
+# Stream logs in real-time
+az containerapp logs show \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --follow
+
+# View recent logs
+az containerapp logs show \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --tail 100
+```
+
+### Monitor with Application Insights
+
+Enable Application Insights for detailed monitoring:
+
+```bash
+# Create Application Insights
+az monitor app-insights component create \
+  --app markitdown-insights \
+  --location $LOCATION \
+  --resource-group $RESOURCE_GROUP
+
+# Get instrumentation key
+INSTRUMENTATION_KEY=$(az monitor app-insights component show \
+  --app markitdown-insights \
+  --resource-group $RESOURCE_GROUP \
+  --query instrumentationKey -o tsv)
+
+# Update container app
+az containerapp update \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=$INSTRUMENTATION_KEY"
+```
+
+## Cost Optimization
+
+<CardGroup cols={2}>
+  <Card title="Auto-Scaling" icon="chart-line">
+    Scale to zero when not in use to minimize costs
+  </Card>
+  <Card title="Right-Sizing" icon="ruler">
+    Start with 0.5 CPU and 1Gi memory, adjust based on usage
+  </Card>
+  <Card title="ACR Tier" icon="layer-group">
+    Use Basic tier for development, Standard/Premium for production
+  </Card>
+  <Card title="Spot Instances" icon="bolt">
+    Consider consumption-based pricing for variable workloads
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Image Pull Errors
+
+```bash
+# Verify ACR credentials
+az acr credential show --name $ACR_NAME
+
+# Check if image exists
+az acr repository show --name $ACR_NAME --image markitdown-api:latest
+```
+
+### Container Won't Start
+
+```bash
+# Check container app status
+az containerapp show \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query properties.runningStatus
+
+# View detailed events
+az containerapp revision list \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP
+```
+
+### Health Check Failing
+
+Verify the health endpoint is accessible:
+
+```bash
+# Get app URL
+APP_URL=$(az containerapp show \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query properties.configuration.ingress.fqdn -o tsv)
+
+# Test health endpoint
+curl -v https://$APP_URL/health
+```
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Managed Identity">
+    Enable managed identity to avoid storing credentials:
+    
+    ```bash
+    az containerapp identity assign \
+      --name $APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --system-assigned
+    ```
+  </Accordion>
+
+  <Accordion title="Network Restrictions">
+    Restrict ingress to specific IP ranges or VNets:
+    
+    ```bash
+    az containerapp ingress update \
+      --name $APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --allow-insecure false
+    ```
+  </Accordion>
+
+  <Accordion title="Secret Management">
+    Use Azure Key Vault for sensitive configuration:
+    
+    ```bash
+    # Reference Key Vault secret
+    az containerapp secret set \
+      --name $APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --secrets openai-key=keyvaultref:KEY_VAULT_URI,identityref:MANAGED_IDENTITY_ID
+    ```
+  </Accordion>
+
+  <Accordion title="Container Scanning">
+    Enable Defender for Containers for vulnerability scanning:
+    
+    ```bash
+    az security pricing create \
+      --name ContainerRegistry \
+      --tier standard
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Deployment" icon="docker" href="/deployment/docker">
+    Learn about Docker deployment options
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/deployment/configuration">
+    Complete environment variable reference
+  </Card>
+</CardGroup>

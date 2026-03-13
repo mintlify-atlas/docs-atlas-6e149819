@@ -1,0 +1,109 @@
+---
+title: 'API Overview'
+description: 'Getting started with the MarkItDown API'
+icon: 'globe'
+---
+
+## Introduction
+
+The MarkItDown API provides a simple REST interface for converting documents to Markdown and converting Markdown back to various document formats.
+
+## Base URL
+
+When running locally:
+
+```
+http://localhost:8000
+```
+
+## Authentication
+
+The API currently does not require authentication. All endpoints are publicly accessible.
+
+## Content Types
+
+The API uses different content types depending on the endpoint:
+
+- **Upload/Convert endpoints**: `multipart/form-data` for file uploads
+- **Response formats**:
+  - `text/markdown` for single Markdown files
+  - `application/zip` for multiple files or multi-sheet Excel files
+  - `application/vnd.openxmlformats-officedocument.wordprocessingml.document` for DOCX
+  - `application/vnd.openxmlformats-officedocument.presentationml.presentation` for PPTX
+  - `text/html` for HTML
+  - `application/json` for JSON responses (health, templates)
+
+## Request Limits
+
+<ParamField path="MAX_UPLOAD_MB" type="integer" default="50">
+  Maximum file size per upload in megabytes. Configurable via environment variable.
+</ParamField>
+
+By default, files are limited to **50 MB** per upload. This can be configured using the `MAX_UPLOAD_MB` environment variable.
+
+## General Response Patterns
+
+### Success Responses
+
+Successful file conversion endpoints return the converted file directly with appropriate `Content-Disposition` headers for download.
+
+### Error Responses
+
+All error responses follow the FastAPI standard format:
+
+```json
+{
+  "detail": "Error message describing what went wrong"
+}
+```
+
+### Common Status Codes
+
+| Status Code | Meaning |
+|-------------|----------|
+| `200` | Success |
+| `400` | Bad Request (invalid parameters, unsupported format) |
+| `413` | Payload Too Large (file exceeds size limit) |
+| `500` | Internal Server Error (conversion failed) |
+| `503` | Service Unavailable (Pandoc service error) |
+
+## CORS Configuration
+
+The API includes CORS middleware with configurable origins. By default, `http://localhost:5173` is allowed. Configure additional origins using the `CORS_ORIGINS` environment variable (comma-separated).
+
+## Available Endpoints
+
+<CardGroup cols={2}>
+  <Card title="POST /upload" icon="upload" href="/api/upload">
+    Convert files to Markdown
+  </Card>
+  <Card title="POST /convert" icon="file-export" href="/api/convert">
+    Convert Markdown to DOCX/PPTX/HTML
+  </Card>
+  <Card title="GET /convert/templates" icon="file-lines" href="/api/templates">
+    List available default templates
+  </Card>
+  <Card title="GET /health" icon="heart-pulse" href="/api/health">
+    API health check
+  </Card>
+</CardGroup>
+
+## Quick Start Example
+
+Convert a document to Markdown:
+
+```bash
+curl -X POST http://localhost:8000/upload \
+  -F "files=@document.pdf" \
+  -o output.md
+```
+
+Convert Markdown to DOCX:
+
+```bash
+curl -X POST http://localhost:8000/convert \
+  -F "file=@document.md" \
+  -F "format=docx" \
+  -F "use_default_template=true" \
+  -o output.docx
+```

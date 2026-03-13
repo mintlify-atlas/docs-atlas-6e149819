@@ -1,0 +1,335 @@
+---
+title: Converting Files to Markdown
+description: Complete guide to converting documents, spreadsheets, and images to Markdown using the MarkItDown API
+---
+
+## Overview
+
+The `POST /upload` endpoint converts various file formats to Markdown using Microsoft's MarkItDown library. It intelligently handles single files, multiple files, and Excel spreadsheets with multiple sheets.
+
+<Note>
+Supported formats include: PDF, DOCX, PPTX, XLSX, XLS, images (JPG, PNG), HTML, and more.
+</Note>
+
+## How It Works
+
+The conversion behavior depends on what you upload:
+
+<CardGroup cols={3}>
+  <Card title="Single File" icon="file">
+    Returns a `.md` file directly
+  </Card>
+  <Card title="Excel Multi-Sheet" icon="table">
+    Returns a `.zip` with one `.md` per sheet
+  </Card>
+  <Card title="Multiple Files" icon="files">
+    Returns a `.zip` with all converted `.md` files
+  </Card>
+</CardGroup>
+
+## Converting a Single File
+
+<Steps>
+  <Step title="Prepare your file">
+    Any supported document, spreadsheet, or image file.
+  </Step>
+  
+  <Step title="Send the request">
+    Use `multipart/form-data` to upload the file:
+
+```bash
+curl -X POST http://localhost:8000/api/upload \
+  -F "files=@document.pdf" \
+  -o output.md
+```
+
+The API returns a Markdown file with the following headers:
+
+**Content-Type**: `text/markdown; charset=utf-8`  
+**Content-Disposition**: `attachment; filename="document.md"`  
+**Body**: Raw Markdown content
+  </Step>
+  
+  <Step title="Use the markdown">
+    The response is a plain `.md` file ready to use:
+
+```markdown
+# Document Title
+
+Converted content appears here with proper formatting...
+```
+  </Step>
+</Steps>
+
+## Converting Multiple Files
+
+When you upload multiple files in a single request, the API returns a ZIP archive containing all converted Markdown files.
+
+```bash
+curl -X POST http://localhost:8000/api/upload \
+  -F "files=@report.pdf" \
+  -F "files=@slides.pptx" \
+  -F "files=@data.xlsx" \
+  -o converted_files.zip
+```
+
+**Response:**
+- Content-Type: `application/zip`
+- Content-Disposition: `attachment; filename="converted_files.zip"`
+- Body: ZIP archive containing:
+  - `report.md`
+  - `slides.md`
+  - `data_1_3.md`, `data_2_3.md`, `data_3_3.md` (if Excel has 3 sheets)
+
+<Note>
+The ZIP file is named `converted_files.zip` and contains one `.md` file per input file (or per Excel sheet).
+</Note>
+
+## Excel Multi-Sheet Handling
+
+Excel files (`.xlsx`, `.xls`, `.xlsm`, `.xlsb`) receive special treatment: each sheet is converted to a separate Markdown file with table formatting.
+
+### Sheet Naming Convention
+
+Each sheet is saved as: `{filename}_{index}_{total}.md`
+
+**Example:** `financial_report.xlsx` with 3 sheets becomes:
+- `financial_report_1_3.md`
+- `financial_report_2_3.md`
+- `financial_report_3_3.md`
+
+### Sheet Conversion Details
+
+Each sheet is converted to a Markdown table:
+
+```bash
+curl -X POST http://localhost:8000/api/upload \
+  -F "files=@sales.xlsx" \
+  -o sales.zip
+```
+
+**Output (sales_1_2.md):**
+```markdown
+# Q1 Sales
+
+| Product | Revenue | Units Sold |
+| --- | --- | --- |
+| Widget A | $50,000 | 1,250 |
+| Widget B | $35,000 | 875 |
+```
+
+<Accordion title="How Excel conversion works (source code)">
+From `app/services/markitdown_service.py:39-68`:
+
+```python
+def _sheet_to_markdown(ws) -> str:
+    rows = list(ws.iter_rows(values_only=True))
+    
+    # Drop trailing fully-empty rows
+    while rows and all(c is None for c in rows[-1]):
+        rows.pop()
+    
+    if not rows:
+        return f"# {ws.title}\n\n*Empty sheet*\n"
+    
+    max_cols = max(len(row) for row in rows)
+    
+    # First row becomes the header
+    header = pad(rows[0], max_cols)
+    separator = ["---"] * max_cols
+    
+    lines = [
+        f"# {ws.title}\n",
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(separator) + " |",
+    ]
+    
+    for row in rows[1:]:
+        lines.append("| " + " | ".join(pad(row, max_cols)) + " |")
+    
+    return "\n".join(lines) + "\n"
+```
+
+The first row becomes the table header, and all subsequent rows are data rows. Empty sheets get a special message.
+</Accordion>
+
+## File Size Limits
+
+The API enforces upload limits configured via the `MAX_UPLOAD_MB` environment variable (default: 50 MB).
+
+```python
+# From app/routers/convert_to_md.py:22-31
+for f in files:
+    content = await f.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File '{f.filename}' exceeds the {MAX_UPLOAD_BYTES // (1024*1024)} MB limit",
+        )
+```
+
+**Error response (413):**
+```json
+{
+  "detail": "File 'huge-file.pdf' exceeds the 50 MB limit"
+}
+```
+
+## Error Handling
+
+<Tabs>
+  <Tab title="400 Bad Request">
+    ```bash
+    # No files provided
+    curl -X POST http://localhost:8000/api/upload
+    ```
+    
+    ```json
+    {
+      "detail": "No files provided"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="413 Payload Too Large">
+    ```bash
+    # File exceeds size limit
+    curl -X POST http://localhost:8000/api/upload \
+      -F "files=@huge-file.pdf"
+    ```
+    
+    ```json
+    {
+      "detail": "File 'huge-file.pdf' exceeds the 50 MB limit"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="500 Internal Error">
+    ```bash
+    # Conversion failure
+    curl -X POST http://localhost:8000/api/upload \
+      -F "files=@corrupted.docx"
+    ```
+    
+    ```json
+    {
+      "detail": "Error converting file: <specific error message>"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Using with Python
+
+```python
+import requests
+
+url = "http://localhost:8000/api/upload"
+
+# Single file
+with open("document.pdf", "rb") as f:
+    files = {"files": f}
+    response = requests.post(url, files=files)
+    
+if response.status_code == 200:
+    with open("output.md", "wb") as out:
+        out.write(response.content)
+
+# Multiple files
+files = [
+    ("files", open("doc1.pdf", "rb")),
+    ("files", open("doc2.docx", "rb")),
+    ("files", open("sheet.xlsx", "rb")),
+]
+response = requests.post(url, files=files)
+
+if response.status_code == 200:
+    with open("converted.zip", "wb") as out:
+        out.write(response.content)
+```
+
+## Using with JavaScript
+
+```javascript
+const formData = new FormData();
+formData.append('files', fileInput.files[0]);
+
+const response = await fetch('http://localhost:8000/api/upload', {
+  method: 'POST',
+  body: formData,
+});
+
+if (response.ok) {
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = response.headers.get('content-disposition')
+    .split('filename=')[1]
+    .replace(/"/g, '');
+  a.click();
+}
+```
+
+## Implementation Details
+
+The conversion logic is handled by `convert_files_to_markdown()` in `app/services/markitdown_service.py:92-129`:
+
+```python
+async def convert_files_to_markdown(
+    files: list,
+) -> Tuple[bytes, str, str]:
+    """
+    Convert uploaded files to markdown.
+    
+    Returns (content_bytes, download_filename, media_type).
+    - Single result  → raw .md file
+    - Multiple results → .zip containing all .md files
+    """
+    converter = _get_converter()
+    results: List[Tuple[str, str]] = []  # (filename, content)
+    
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp = Path(tmp_dir)
+        
+        for upload in files:
+            raw = await upload.read()
+            tmp_file = tmp / upload.filename
+            tmp_file.write_bytes(raw)
+            
+            if _is_excel(upload.filename):
+                # Multi-sheet handling
+                results.extend(_convert_excel(tmp_file, upload.filename))
+            else:
+                # Standard conversion
+                result = converter.convert(str(tmp_file))
+                stem = Path(upload.filename).stem
+                results.append((f"{stem}.md", result.text_content))
+    
+    if len(results) == 1:
+        filename, content = results[0]
+        return content.encode("utf-8"), filename, "text/markdown; charset=utf-8"
+    
+    # Multiple files → ZIP
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, content in results:
+            zf.writestr(filename, content)
+    return buf.getvalue(), "converted_files.zip", "application/zip"
+```
+
+<Note>
+See [AI-Enhanced OCR](/guides/ai-enhanced-ocr) to learn how to enable OpenAI-powered image description for better conversion of images and scanned documents.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Convert from Markdown" icon="file-export" href="/guides/converting-from-markdown">
+    Learn how to convert Markdown back to DOCX, PPTX, or HTML
+  </Card>
+  <Card title="AI-Enhanced OCR" icon="brain" href="/guides/ai-enhanced-ocr">
+    Enable OpenAI for better image and scanned document conversion
+  </Card>
+</CardGroup>

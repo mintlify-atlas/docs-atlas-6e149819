@@ -1,0 +1,191 @@
+---
+title: 'Error Responses'
+description: 'Error response format and common error codes'
+icon: 'triangle-exclamation'
+---
+
+## Error Response Format
+
+All API errors follow FastAPI's standard HTTP exception format:
+
+```json
+{
+  "detail": "Error message describing what went wrong"
+}
+```
+
+The HTTP status code indicates the error category, and the `detail` field provides specific information about the error.
+
+## HTTP Status Codes
+
+<CardGroup cols={2}>
+  <Card title="400 Bad Request" icon="xmark-circle">
+    Invalid request parameters or unsupported format
+  </Card>
+  <Card title="413 Payload Too Large" icon="file-exclamation">
+    Uploaded file exceeds size limit
+  </Card>
+  <Card title="500 Internal Server Error" icon="server">
+    Unexpected server error during processing
+  </Card>
+  <Card title="503 Service Unavailable" icon="triangle-exclamation">
+    External service (Pandoc) failure
+  </Card>
+</CardGroup>
+
+## Common Error Codes
+
+### 400 - Bad Request
+
+#### No Files Provided
+**Endpoint:** `POST /upload`
+
+```json
+{
+  "detail": "No files provided"
+}
+```
+
+Returned when the upload endpoint receives an empty file list.
+
+**Source:** `app/routers/convert_to_md.py:20`
+
+#### Unsupported Format
+**Endpoint:** `POST /convert`
+
+```json
+{
+  "detail": "Unsupported format 'pdf'. Allowed: docx, html, pptx"
+}
+```
+
+Returned when requesting conversion to a format not in the allowed set (`docx`, `pptx`, `html`).
+
+**Source:** `app/routers/convert_from_md.py:42-45`
+
+#### Template Format Mismatch
+**Endpoint:** `POST /convert`
+
+```json
+{
+  "detail": "Template must be a .docx file when converting to docx"
+}
+```
+
+Returned when the uploaded template file extension doesn't match the target output format (e.g., uploading a `.pptx` template when converting to DOCX).
+
+**Source:** `app/routers/convert_from_md.py:55-58`
+
+### 413 - Payload Too Large
+
+#### File Size Limit Exceeded (With Filename)
+**Endpoint:** `POST /upload`
+
+```json
+{
+  "detail": "File 'large_document.pdf' exceeds the 50 MB limit"
+}
+```
+
+Returned when an individual uploaded file exceeds the configured maximum upload size. The error message includes the specific filename and the limit in MB.
+
+**Source:** `app/routers/convert_to_md.py:26-29`
+
+#### File Size Limit Exceeded (Generic)
+**Endpoint:** `POST /convert`
+
+```json
+{
+  "detail": "File too large"
+}
+```
+
+Returned when the markdown file uploaded for conversion exceeds the size limit.
+
+**Source:** `app/routers/convert_from_md.py:49`
+
+### 500 - Internal Server Error
+
+#### General Processing Error
+**Endpoints:** `POST /upload`, `POST /convert`
+
+```json
+{
+  "detail": "<exception message>"
+}
+```
+
+Returned when an unexpected error occurs during file conversion. The detail field contains the actual exception message from the conversion service.
+
+**Sources:**
+- `app/routers/convert_to_md.py:36`
+- `app/routers/convert_from_md.py:74`
+
+### 503 - Service Unavailable
+
+#### Pandoc Runtime Error
+**Endpoint:** `POST /convert`
+
+```json
+{
+  "detail": "<runtime error message>"
+}
+```
+
+Returned when Pandoc fails to convert the markdown file. This typically indicates a problem with the Pandoc installation or conversion process.
+
+**Source:** `app/routers/convert_from_md.py:72`
+
+## Error Handling Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always check response status codes">
+    Before parsing the response body, check the HTTP status code. Success responses return `200 OK`, while errors return `4xx` or `5xx` codes.
+  </Accordion>
+
+  <Accordion title="Parse the detail field for context">
+    The `detail` field provides human-readable error messages that can help diagnose issues. For file size errors, it includes the specific filename and limit.
+  </Accordion>
+
+  <Accordion title="Handle 413 errors gracefully">
+    When receiving a 413 error, inform users about the file size limit (default 50 MB) and suggest splitting large files or adjusting the server configuration.
+  </Accordion>
+
+  <Accordion title="Retry 503 errors">
+    Service unavailable errors may be temporary. Implement exponential backoff retry logic for production applications.
+  </Accordion>
+
+  <Accordion title="Validate input before upload">
+    To avoid 400 errors, validate file formats and parameters on the client side before making API requests.
+  </Accordion>
+</AccordionGroup>
+
+## Example Error Handling
+
+```python
+import requests
+
+url = "https://api.example.com/upload"
+files = {'files': open('document.pdf', 'rb')}
+
+response = requests.post(url, files=files)
+
+if response.status_code == 200:
+    # Success - process the converted markdown
+    content = response.content
+elif response.status_code == 413:
+    error = response.json()
+    print(f"File too large: {error['detail']}")
+    # Suggest splitting the file or compressing it
+elif response.status_code == 400:
+    error = response.json()
+    print(f"Bad request: {error['detail']}")
+    # Check format, parameters, etc.
+elif response.status_code == 503:
+    error = response.json()
+    print(f"Service unavailable: {error['detail']}")
+    # Retry after delay
+else:
+    error = response.json()
+    print(f"Error {response.status_code}: {error['detail']}")
+```

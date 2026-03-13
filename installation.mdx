@@ -1,0 +1,312 @@
+---
+title: 'Installation'
+description: 'Run the MarkItDown API locally or via Docker'
+---
+
+The MarkItDown API can be run locally using Python or deployed using Docker. This guide covers both approaches.
+
+## Prerequisites
+
+<CardGroup cols={2}>
+  <Card title="Local Installation" icon="python">
+    - Python 3.12 or higher
+    - pip package manager
+  </Card>
+  <Card title="Docker Installation" icon="docker">
+    - Docker installed
+    - Docker Compose (optional)
+  </Card>
+</CardGroup>
+
+## Local Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone <repository-url>
+    cd markitdown-api
+    ```
+  </Step>
+
+  <Step title="Create a virtual environment">
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    The API requires the following packages:
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+    **Key dependencies:**
+    - `fastapi==0.115.6` - Web framework
+    - `uvicorn[standard]==0.32.1` - ASGI server
+    - `markitdown[all]==0.1.1` - Document to Markdown conversion
+    - `pypandoc_binary` - Markdown to document conversion (includes Pandoc)
+    - `python-multipart==0.0.12` - File upload support
+
+    <Note>
+      The `pypandoc_binary` package includes Pandoc, so you don't need to install it separately.
+    </Note>
+  </Step>
+
+  <Step title="Configure environment variables">
+    Copy the example environment file:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` and configure the following variables:
+
+    ```bash .env
+    # Optional: OpenAI API key for AI-enhanced image OCR
+    # Without this, text-based formats still work perfectly
+    OPENAI_API_KEY=
+
+    # Comma-separated list of allowed CORS origins
+    CORS_ORIGINS=http://localhost:5173
+
+    # Maximum file upload size in megabytes (default: 50)
+    MAX_UPLOAD_MB=50
+    ```
+
+    <Warning>
+      The `OPENAI_API_KEY` is optional. If not provided, all text-based format conversions (PDF, DOCX, XLSX, etc.) still work perfectly. Only AI-enhanced image descriptions will be skipped.
+    </Warning>
+  </Step>
+
+  <Step title="Start the server">
+    ```bash
+    uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ```
+
+    The API will be available at `http://localhost:8000`
+
+    For development with auto-reload:
+
+    ```bash
+    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ```
+  </Step>
+
+  <Step title="Verify installation">
+    Test the health endpoint:
+
+    ```bash
+    curl http://localhost:8000/health
+    ```
+
+    Expected response:
+
+    ```json
+    {"status": "ok"}
+    ```
+  </Step>
+</Steps>
+
+## Docker Installation
+
+Running with Docker is the easiest way to get started without managing Python dependencies.
+
+### Using Docker Compose (Recommended)
+
+<Steps>
+  <Step title="Configure environment">
+    Copy and edit the environment file:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Update the values in `.env` as needed:
+
+    ```bash .env
+    CORS_ORIGINS=http://localhost:5173
+    OPENAI_API_KEY=
+    MAX_UPLOAD_MB=50
+    ```
+  </Step>
+
+  <Step title="Start the container">
+    ```bash
+    docker-compose up -d
+    ```
+
+    This will:
+    - Build the Docker image
+    - Start the container named `markitdown-api`
+    - Expose the API on port 8000
+    - Configure automatic restarts
+  </Step>
+
+  <Step title="View logs">
+    ```bash
+    docker-compose logs -f
+    ```
+  </Step>
+
+  <Step title="Stop the container">
+    ```bash
+    docker-compose down
+    ```
+  </Step>
+</Steps>
+
+### Using Docker Directly
+
+If you prefer to use Docker without Compose:
+
+<Steps>
+  <Step title="Build the image">
+    ```bash
+    docker build -t markitdown-api .
+    ```
+  </Step>
+
+  <Step title="Run the container">
+    ```bash
+    docker run -d \
+      -p 8000:8000 \
+      -e CORS_ORIGINS="http://localhost:5173" \
+      -e MAX_UPLOAD_MB=50 \
+      --name markitdown-api \
+      markitdown-api
+    ```
+
+    With OpenAI support:
+
+    ```bash
+    docker run -d \
+      -p 8000:8000 \
+      -e CORS_ORIGINS="http://localhost:5173" \
+      -e OPENAI_API_KEY="your-api-key" \
+      -e MAX_UPLOAD_MB=50 \
+      --name markitdown-api \
+      markitdown-api
+    ```
+  </Step>
+</Steps>
+
+## Docker Image Details
+
+The Dockerfile uses:
+
+- **Base image:** `python:3.12-slim`
+- **System dependencies:** `libmagic1` (for file type detection)
+- **Working directory:** `/app`
+- **Port:** 8000
+- **Non-root user:** `appuser` (required for Azure Container Apps)
+- **Health check:** Available at `/health` endpoint
+
+<Note>
+  The image includes a health check that runs every 30 seconds to ensure the API is responding correctly.
+</Note>
+
+## Deployment to Azure
+
+For Azure Container Apps deployment:
+
+<Steps>
+  <Step title="Update docker-compose.yml">
+    Uncomment the ACR image line and configure your registry:
+
+    ```yaml docker-compose.yml
+    services:
+      api:
+        # Comment out build
+        # build: .
+        # Use your ACR image
+        image: ${ACR_REGISTRY}.azurecr.io/markitdown-api:${IMAGE_TAG:-latest}
+    ```
+  </Step>
+
+  <Step title="Set ACR variables">
+    Add to your `.env`:
+
+    ```bash
+    ACR_REGISTRY=myregistry
+    IMAGE_TAG=latest
+    ```
+  </Step>
+
+  <Step title="Update CORS origins">
+    Set your production frontend URL:
+
+    ```bash
+    CORS_ORIGINS=https://my-app.azurestaticapps.net
+    ```
+  </Step>
+</Steps>
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENAI_API_KEY` | No | - | OpenAI API key for AI-enhanced image OCR. Without this, text-based formats still work. |
+| `CORS_ORIGINS` | No | `http://localhost:5173` | Comma-separated list of allowed origins for CORS. |
+| `MAX_UPLOAD_MB` | No | `50` | Maximum file upload size in megabytes. |
+
+### System Requirements
+
+For local installation:
+
+- **Python:** 3.12 or higher
+- **Memory:** Minimum 512 MB RAM, 2 GB recommended for large documents
+- **Disk:** 500 MB for dependencies
+
+## Troubleshooting
+
+### Port already in use
+
+If port 8000 is already in use, specify a different port:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+Or with Docker:
+
+```bash
+docker run -d -p 8080:8000 markitdown-api
+```
+
+### libmagic not found
+
+On Ubuntu/Debian:
+
+```bash
+sudo apt-get install libmagic1
+```
+
+On macOS:
+
+```bash
+brew install libmagic
+```
+
+### Template generation issues
+
+On first startup, the API generates default Pandoc templates. If you see errors:
+
+```bash
+rm -rf app/templates/
+# Restart the API to regenerate
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Make your first API calls
+  </Card>
+  <Card title="API Reference" icon="book" href="/api/overview">
+    Explore all endpoints and parameters
+  </Card>
+</CardGroup>

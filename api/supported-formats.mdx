@@ -1,0 +1,309 @@
+---
+title: 'Supported Formats'
+description: 'Complete list of input and output formats'
+icon: 'file-lines'
+---
+
+## Overview
+
+MarkItDown API supports two conversion workflows:
+
+<CardGroup cols={2}>
+  <Card title="To Markdown" icon="arrow-right" href="#input-formats-to-markdown">
+    Convert various document formats to Markdown
+  </Card>
+  <Card title="From Markdown" icon="arrow-left" href="#output-formats-from-markdown">
+    Convert Markdown to DOCX, PPTX, or HTML
+  </Card>
+</CardGroup>
+
+## Input Formats (To Markdown)
+
+The `/upload` endpoint uses the [MarkItDown](https://github.com/microsoft/markitdown) library with the `[all]` extra to support a wide range of input formats.
+
+**Dependency:** `markitdown[all]==0.1.1` (from `requirements.txt:5`)
+
+### Document Formats
+
+<AccordionGroup>
+  <Accordion title="Microsoft Office Documents">
+    - **Word**: `.docx`, `.doc`
+    - **PowerPoint**: `.pptx`, `.ppt`
+    - **Excel**: See dedicated section below
+  </Accordion>
+
+  <Accordion title="PDFs">
+    - **Portable Document Format**: `.pdf`
+    - Text extraction with layout preservation
+    - Supports OCR with OpenAI integration (optional)
+  </Accordion>
+
+  <Accordion title="Images">
+    - **Common formats**: `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`
+    - OCR capabilities when `OPENAI_API_KEY` is configured
+    - Uses GPT-4o-mini model for enhanced image description
+  </Accordion>
+
+  <Accordion title="Audio Files">
+    - **Audio formats**: `.mp3`, `.wav`, `.m4a`
+    - Transcription capabilities (requires additional configuration)
+  </Accordion>
+
+  <Accordion title="HTML">
+    - **Web pages**: `.html`, `.htm`
+    - Converts HTML structure to clean Markdown
+  </Accordion>
+
+  <Accordion title="Text Files">
+    - **Plain text**: `.txt`
+    - **CSV**: `.csv` (converted to Markdown tables)
+    - **JSON**: `.json`
+    - **XML**: `.xml`
+  </Accordion>
+
+  <Accordion title="Other Formats">
+    - **ZIP archives**: Extracts and converts contents
+    - **RSS feeds**: `.rss`
+    - Additional formats supported by MarkItDown core
+  </Accordion>
+</AccordionGroup>
+
+### Excel Files - Special Handling
+
+Excel files receive custom processing with multi-sheet support:
+
+**Supported Extensions:**
+```python
+EXCEL_EXTENSIONS = {".xlsx", ".xls", ".xlsm", ".xlsb"}
+```
+**Source:** `app/services/markitdown_service.py:12`
+
+#### Excel Conversion Behavior
+
+<Steps>
+  <Step title="Sheet Detection">
+    All sheets in the workbook are detected and processed individually
+  </Step>
+  
+  <Step title="Table Generation">
+    Each sheet is converted to a Markdown table with:
+    - First row as header
+    - Proper escaping of pipes (`|`) and newlines
+    - Empty cells preserved
+  </Step>
+  
+  <Step title="File Naming">
+    Output files use the pattern: `{stem}_{index}_{total}.md`
+    
+    Example: `finanzas_1_3.md`, `finanzas_2_3.md`, `finanzas_3_3.md`
+  </Step>
+  
+  <Step title="ZIP Output">
+    Multi-sheet workbooks return a ZIP file containing all markdown files
+  </Step>
+</Steps>
+
+**Example Output Structure:**
+
+```markdown
+# Sheet1
+
+| Name | Age | City |
+| --- | --- | --- |
+| Alice | 30 | New York |
+| Bob | 25 | San Francisco |
+```
+
+**Source:** `app/services/markitdown_service.py:71-89`
+
+### OpenAI Integration (Optional)
+
+For enhanced image OCR and description:
+
+```python
+if OPENAI_API_KEY:
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    return MarkItDown(mlm_client=client, mlm_model="gpt-4o-mini")
+```
+
+**Configuration:** Set `OPENAI_API_KEY` environment variable
+
+**Source:** `app/services/markitdown_service.py:15-24`
+
+## Output Formats (From Markdown)
+
+The `/convert` endpoint converts Markdown to three output formats using Pandoc:
+
+```python
+ALLOWED_FORMATS: set[str] = {"docx", "pptx", "html"}
+```
+**Source:** `app/routers/convert_from_md.py:12`
+
+### Supported Output Formats
+
+| Format | Extension | Media Type | Template Support |
+|--------|-----------|------------|------------------|
+| **Microsoft Word** | `.docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | Yes |
+| **PowerPoint** | `.pptx` | `application/vnd.openxmlformats-officedocument.presentationml.presentation` | Yes |
+| **HTML** | `.html` | `text/html; charset=utf-8` | No |
+
+**Source:** `app/services/pandoc_service.py:19-23`
+
+### Format Details
+
+<Tabs>
+  <Tab title="DOCX">
+    **Microsoft Word Document**
+    
+    - Full formatting support (headings, lists, tables, images)
+    - Custom templates supported (`.docx` reference documents)
+    - Default template auto-generated from Pandoc
+    - Best for: Reports, documentation, formal documents
+    
+    **Template Configuration:**
+    ```python
+    DEFAULT_TEMPLATES = {
+        "docx": "default.docx",
+        # ...
+    }
+    ```
+  </Tab>
+  
+  <Tab title="PPTX">
+    **PowerPoint Presentation**
+    
+    - Converts headings to slides
+    - Supports images and lists
+    - Custom templates supported (`.pptx` reference documents)
+    - Default template auto-generated from Pandoc
+    - Best for: Presentations, slide decks
+    
+    **Slide Generation:**
+    - `# Heading` → New slide with title
+    - `## Subheading` → Content within slide
+  </Tab>
+  
+  <Tab title="HTML">
+    **Standalone HTML Document**
+    
+    - Self-contained HTML file
+    - Includes inline CSS
+    - No template support
+    - Generated with `--standalone` flag
+    - Best for: Web publishing, email, embedding
+    
+    **Pandoc Configuration:**
+    ```python
+    elif output_format == "html":
+        extra_args += ["--standalone"]
+    ```
+  </Tab>
+</Tabs>
+
+### Template Files
+
+For DOCX and PPTX formats, you can provide custom reference templates:
+
+**Allowed Template Formats:**
+```python
+ALLOWED_TEMPLATE_FORMATS: set[str] = {"docx", "pptx"}
+```
+**Source:** `app/routers/convert_from_md.py:13`
+
+**Validation:**
+- Template extension must match output format
+- Example: Converting to DOCX requires a `.docx` template
+- Mismatch returns HTTP 400 error
+
+**Source:** `app/routers/convert_from_md.py:54-58`
+
+## Format Validation
+
+### Input Validation (To Markdown)
+
+The `/upload` endpoint accepts any file format supported by MarkItDown. No explicit format validation is performed - unsupported formats will fail during conversion with an HTTP 500 error.
+
+### Output Validation (From Markdown)
+
+The `/convert` endpoint strictly validates the requested format:
+
+```python
+fmt = format.lower().strip()
+if fmt not in ALLOWED_FORMATS:
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unsupported format '{fmt}'. Allowed: {', '.join(sorted(ALLOWED_FORMATS))}",
+    )
+```
+
+**Source:** `app/routers/convert_from_md.py:40-45`
+
+**Error Example:**
+```json
+{
+  "detail": "Unsupported format 'pdf'. Allowed: docx, html, pptx"
+}
+```
+
+## Response Formats
+
+### Single File Response
+
+When converting a single file (or single-sheet Excel):
+
+```http
+Content-Type: text/markdown; charset=utf-8
+Content-Disposition: attachment; filename="document.md"
+
+[Markdown content]
+```
+
+### ZIP Archive Response
+
+When uploading multiple files or multi-sheet Excel:
+
+```http
+Content-Type: application/zip
+Content-Disposition: attachment; filename="converted_files.zip"
+
+[ZIP binary content]
+```
+
+**Source:** `app/services/markitdown_service.py:124-129`
+
+## Format Recommendations
+
+<AccordionGroup>
+  <Accordion title="Best formats for document conversion">
+    **High fidelity:** PDF, DOCX, PPTX
+    
+    **Good structure preservation:** HTML, Markdown
+    
+    **Tabular data:** Excel, CSV (converted to tables)
+  </Accordion>
+
+  <Accordion title="Limitations to be aware of">
+    - Complex formatting may not preserve perfectly
+    - Images in PDFs may need OCR (requires OpenAI key)
+    - Audio/video transcription requires additional setup
+    - Scanned documents need OCR capabilities
+  </Accordion>
+
+  <Accordion title="Choosing output format">
+    - **DOCX**: For editable documents, reports, formal documentation
+    - **PPTX**: For presentations and slide-based content
+    - **HTML**: For web publishing, email templates, or embedding
+  </Accordion>
+
+  <Accordion title="Template usage">
+    Use custom templates when:
+    - You need consistent branding
+    - Specific styles are required (fonts, colors, spacing)
+    - Corporate document standards must be followed
+    
+    Use default templates for:
+    - Quick conversions
+    - Prototyping
+    - When appearance is not critical
+  </Accordion>
+</AccordionGroup>

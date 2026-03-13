@@ -1,0 +1,318 @@
+---
+title: 'Docker Deployment'
+description: 'Deploy MarkItDown API using Docker and Docker Compose'
+icon: 'docker'
+---
+
+## Overview
+
+The MarkItDown API is fully containerized and can be deployed using Docker or Docker Compose. The official Docker image is based on Python 3.12-slim and includes all required dependencies.
+
+## Prerequisites
+
+- Docker 20.10 or higher
+- Docker Compose v2.0 or higher (optional, for compose deployment)
+
+## Quick Start with Docker Compose
+
+The easiest way to deploy is using Docker Compose:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone <repository-url>
+    cd markitdown-api
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    Copy the example environment file and configure your settings:
+    ```bash
+    cp .env.example .env
+    ```
+    
+    Edit `.env` to set your configuration. See the [Configuration](/deployment/configuration) page for all available options.
+  </Step>
+
+  <Step title="Start the service">
+    ```bash
+    docker-compose up -d
+    ```
+    
+    The API will be available at `http://localhost:8000`.
+  </Step>
+
+  <Step title="Verify the deployment">
+    Check the health endpoint:
+    ```bash
+    curl http://localhost:8000/health
+    ```
+    
+    Expected response:
+    ```json
+    {"status": "ok"}
+    ```
+  </Step>
+</Steps>
+
+## Docker Compose Configuration
+
+The `docker-compose.yml` includes the following configuration:
+
+```yaml docker-compose.yml
+services:
+  api:
+    # For local development: use `build: .`
+    # For Azure: comment out `build` and uncomment `image` with your ACR
+    build: .
+    # image: ${ACR_REGISTRY}.azurecr.io/markitdown-api:${IMAGE_TAG:-latest}
+    container_name: markitdown-api
+    ports:
+      - "8000:8000"
+    environment:
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-50}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+```
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="Auto-restart" icon="rotate">
+    Container automatically restarts unless manually stopped
+  </Card>
+  <Card title="Health Checks" icon="heart-pulse">
+    Built-in health monitoring every 30 seconds
+  </Card>
+  <Card title="Port Mapping" icon="network-wired">
+    Exposes port 8000 for API access
+  </Card>
+  <Card title="Environment Config" icon="gear">
+    Fully configurable via environment variables
+  </Card>
+</CardGroup>
+
+## Manual Docker Commands
+
+### Build the Image
+
+```bash
+docker build -t markitdown-api:latest .
+```
+
+### Run the Container
+
+<CodeGroup>
+```bash Basic
+docker run -d \
+  --name markitdown-api \
+  -p 8000:8000 \
+  markitdown-api:latest
+```
+
+```bash With Environment Variables
+docker run -d \
+  --name markitdown-api \
+  -p 8000:8000 \
+  -e CORS_ORIGINS="http://localhost:5173,https://myapp.com" \
+  -e MAX_UPLOAD_MB=100 \
+  -e OPENAI_API_KEY="sk-..." \
+  markitdown-api:latest
+```
+
+```bash With .env File
+docker run -d \
+  --name markitdown-api \
+  -p 8000:8000 \
+  --env-file .env \
+  markitdown-api:latest
+```
+</CodeGroup>
+
+### Manage the Container
+
+```bash
+# View logs
+docker logs markitdown-api
+
+# Follow logs in real-time
+docker logs -f markitdown-api
+
+# Stop the container
+docker stop markitdown-api
+
+# Start the container
+docker start markitdown-api
+
+# Restart the container
+docker restart markitdown-api
+
+# Remove the container
+docker rm markitdown-api
+```
+
+## Dockerfile Details
+
+The official Dockerfile is optimized for production use:
+
+```dockerfile Dockerfile
+FROM python:3.12-slim
+
+# libmagic1 is required by markitdown for file type detection
+# pandoc is NOT needed here — pypandoc_binary bundles it
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies first (layer cache)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Non-root user (required by Azure Container Apps)
+RUN adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+### Image Optimizations
+
+- **Base Image**: Uses `python:3.12-slim` for minimal size
+- **System Dependencies**: Only installs `libmagic1` for file type detection
+- **Layer Caching**: Dependencies installed before application code for faster rebuilds
+- **Security**: Runs as non-root user `appuser`
+- **Clean Build**: Removes apt cache to reduce image size
+- **Bundled Pandoc**: Uses `pypandoc_binary` to avoid external pandoc installation
+
+## Health Checks
+
+The container includes built-in health monitoring:
+
+- **Endpoint**: `GET /health`
+- **Interval**: Every 30 seconds
+- **Timeout**: 10 seconds
+- **Retries**: 3 attempts before marking unhealthy
+- **Start Period**: 15 seconds grace period on startup
+
+### Check Container Health
+
+```bash
+# Using Docker
+docker inspect --format='{{.State.Health.Status}}' markitdown-api
+
+# Using curl
+curl http://localhost:8000/health
+```
+
+## Production Considerations
+
+<AccordionGroup>
+  <Accordion title="Resource Limits">
+    Set memory and CPU limits in production:
+    
+    ```yaml
+    services:
+      api:
+        deploy:
+          resources:
+            limits:
+              cpus: '1.0'
+              memory: 1G
+            reservations:
+              cpus: '0.5'
+              memory: 512M
+    ```
+  </Accordion>
+
+  <Accordion title="Volume Mounts">
+    If you need persistent storage for templates or logs:
+    
+    ```yaml
+    services:
+      api:
+        volumes:
+          - ./templates:/app/app/templates
+          - ./logs:/app/logs
+    ```
+  </Accordion>
+
+  <Accordion title="Network Configuration">
+    Use custom networks for multi-container deployments:
+    
+    ```yaml
+    networks:
+      backend:
+        driver: bridge
+    
+    services:
+      api:
+        networks:
+          - backend
+    ```
+  </Accordion>
+
+  <Accordion title="Security">
+    - Keep the base image updated: `docker pull python:3.12-slim`
+    - Use secrets management instead of environment variables for sensitive data
+    - Run container with read-only filesystem where possible
+    - Enable Docker Content Trust for image verification
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### Container Won't Start
+
+```bash
+# Check container logs
+docker logs markitdown-api
+
+# Check container details
+docker inspect markitdown-api
+```
+
+### Port Already in Use
+
+Change the host port mapping:
+
+```bash
+docker run -p 8080:8000 markitdown-api:latest
+```
+
+### Health Check Failing
+
+Check if the application is responding:
+
+```bash
+# Execute command inside container
+docker exec markitdown-api curl http://localhost:8000/health
+
+# Check application logs
+docker logs markitdown-api
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Azure Deployment" icon="microsoft" href="/deployment/azure">
+    Deploy to Azure Container Apps
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/deployment/configuration">
+    Configure environment variables
+  </Card>
+</CardGroup>

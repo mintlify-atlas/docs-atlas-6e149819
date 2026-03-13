@@ -1,0 +1,187 @@
+---
+title: 'File Size Limits'
+description: 'Upload size limits and configuration'
+icon: 'file-arrow-up'
+---
+
+## Default Limits
+
+The MarkItDown API enforces file size limits to ensure system stability and performance.
+
+<Card title="Maximum Upload Size" icon="gauge-max">
+  **Default: 50 MB** per file
+  
+  Configurable via the `MAX_UPLOAD_MB` environment variable
+</Card>
+
+## Configuration
+
+The file size limit is defined in `app/config.py` and can be customized via environment variables:
+
+```python
+# Max upload size in MB
+MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
+MAX_UPLOAD_BYTES: int = MAX_UPLOAD_MB * 1024 * 1024
+```
+
+**Source:** `app/config.py:14-16`
+
+### Changing the Limit
+
+To modify the upload size limit, set the `MAX_UPLOAD_MB` environment variable:
+
+<CodeGroup>
+
+```bash Docker
+docker run -e MAX_UPLOAD_MB=100 markitdown-api
+```
+
+```bash Environment File
+# .env
+MAX_UPLOAD_MB=100
+```
+
+```bash Shell
+export MAX_UPLOAD_MB=100
+python -m uvicorn app.main:app
+```
+
+</CodeGroup>
+
+## Validation Logic
+
+### Upload Endpoint (`POST /upload`)
+
+The `/upload` endpoint validates each file individually before processing:
+
+```python
+for f in files:
+    # Read size without consuming the stream
+    content = await f.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File '{f.filename}' exceeds the {MAX_UPLOAD_BYTES // (1024*1024)} MB limit",
+        )
+    # Reset so the service can read it again
+    await f.seek(0)
+```
+
+**Source:** `app/routers/convert_to_md.py:22-31`
+
+**Key Points:**
+- Validates size before processing to fail fast
+- Includes specific filename in error message
+- Resets file stream after validation for subsequent reading
+- Returns HTTP 413 (Payload Too Large) on violation
+
+### Convert Endpoint (`POST /convert`)
+
+The `/convert` endpoint performs a simpler check on the markdown file:
+
+```python
+md_content = await file.read()
+if len(md_content) > MAX_UPLOAD_BYTES:
+    raise HTTPException(status_code=413, detail="File too large")
+```
+
+**Source:** `app/routers/convert_from_md.py:47-49`
+
+**Key Points:**
+- Generic error message without filename
+- Same size limit applies
+- Returns HTTP 413 on violation
+
+## Multi-file Uploads
+
+When uploading multiple files to the `/upload` endpoint:
+
+<CardGroup cols={2}>
+  <Card title="Per-File Limit" icon="file">
+    Each file must be under the limit individually
+  </Card>
+  <Card title="No Total Limit" icon="files">
+    No aggregate limit across all files in one request
+  </Card>
+</CardGroup>
+
+**Example:**
+- Limit: 50 MB
+- Upload: 3 files at 45 MB each
+- Result: **Success** (each file is under 50 MB)
+
+**Example with Failure:**
+- Limit: 50 MB
+- Upload: 2 files (40 MB, 55 MB)
+- Result: **Error 413** - Second file exceeds limit
+
+```json
+{
+  "detail": "File 'large_spreadsheet.xlsx' exceeds the 50 MB limit"
+}
+```
+
+## Template Files
+
+Custom template files uploaded to the `/convert` endpoint are not explicitly size-validated in the current implementation. However, they are subject to FastAPI's underlying request size limits.
+
+**Best Practice:** Keep template files under 10 MB for optimal performance.
+
+## Recommendations
+
+<AccordionGroup>
+  <Accordion title="Choose appropriate limits for your use case">
+    - **Public APIs:** 10-50 MB to prevent abuse
+    - **Internal tools:** 100-500 MB for large documents
+    - **Enterprise:** 1 GB+ with proper infrastructure
+  </Accordion>
+
+  <Accordion title="Consider memory implications">
+    Files are loaded into memory during processing. Ensure your server has adequate RAM:
+    - Minimum RAM: 2-3x the max upload size
+    - Concurrent requests multiply memory needs
+  </Accordion>
+
+  <Accordion title="Implement client-side validation">
+    Check file sizes before upload to provide immediate feedback:
+    
+    ```javascript
+    const maxSize = 50 * 1024 * 1024; // 50 MB in bytes
+    if (file.size > maxSize) {
+      alert('File exceeds 50 MB limit');
+      return;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Handle large files differently">
+    For files exceeding limits:
+    - Split documents into smaller sections
+    - Compress before upload (for supported formats)
+    - Use streaming processing if implementing custom solutions
+  </Accordion>
+
+  <Accordion title="Monitor and adjust limits">
+    Track usage patterns:
+    - Average file sizes
+    - Peak file sizes
+    - Failed upload rates
+    
+    Adjust limits based on real-world data and infrastructure capacity.
+  </Accordion>
+</AccordionGroup>
+
+## Error Response
+
+When a file exceeds the limit, you'll receive an HTTP 413 response:
+
+```http
+HTTP/1.1 413 Payload Too Large
+Content-Type: application/json
+
+{
+  "detail": "File 'document.pdf' exceeds the 50 MB limit"
+}
+```
+
+See the [Error Responses](/api/errors) page for complete error handling documentation.

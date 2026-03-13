@@ -1,0 +1,394 @@
+---
+title: AI-Enhanced OCR
+description: Enable OpenAI-powered image description for better conversion of images and scanned documents
+---
+
+## Overview
+
+By default, the MarkItDown API can convert text-based documents (PDF, DOCX, XLSX, etc.) without any external dependencies. However, when converting images or scanned documents, you can optionally enable AI-enhanced OCR using OpenAI's vision models for better text extraction and image description.
+
+<Note>
+AI-enhanced OCR is **completely optional**. The API works perfectly for all text-based formats without an OpenAI API key.
+</Note>
+
+## What Gets Enhanced?
+
+With OpenAI integration enabled, the API can:
+
+<CardGroup cols={2}>
+  <Card title="Image Files" icon="image">
+    Extract text and describe content from JPG, PNG, GIF, and other image formats
+  </Card>
+  <Card title="Scanned PDFs" icon="file-pdf">
+    Better text extraction from scanned or image-based PDF pages
+  </Card>
+  <Card title="Embedded Images" icon="file-image">
+    Describe images embedded in DOCX, PPTX, and other documents
+  </Card>
+  <Card title="Screenshots" icon="camera">
+    Extract UI text and describe interface elements
+  </Card>
+</CardGroup>
+
+## How It Works
+
+The MarkItDown library uses OpenAI's `gpt-4o-mini` model to analyze images via the Vision API. When configured, images are sent to OpenAI for analysis, and the response is included in the Markdown output.
+
+### With AI Enhancement
+
+```markdown
+![Image](image.jpg)
+
+**AI Description:** A modern office workspace with two monitors displaying code,
+a mechanical keyboard, and a succulent plant on the desk. Natural light coming
+from the left window.
+```
+
+### Without AI Enhancement
+
+```markdown
+![Image](image.jpg)
+```
+
+## Configuration
+
+<Steps>
+  <Step title="Get an OpenAI API Key">
+    1. Sign up at [platform.openai.com](https://platform.openai.com)
+    2. Navigate to **API keys** in your account settings
+    3. Click **Create new secret key**
+    4. Copy the key (starts with `sk-`)
+  </Step>
+  
+  <Step title="Set the environment variable">
+    Add your API key to the `.env` file:
+    
+    ```bash
+    # .env
+    OPENAI_API_KEY=sk-proj-your-api-key-here
+    ```
+    
+    Or set it directly in your environment:
+    
+    ```bash
+    export OPENAI_API_KEY=sk-proj-your-api-key-here
+    ```
+  </Step>
+  
+  <Step title="Restart the API server">
+    ```bash
+    # If running locally
+    uvicorn app.main:app --reload
+    
+    # If using Docker Compose
+    docker-compose restart backend
+    ```
+    
+    The server will detect the API key and enable AI-enhanced OCR automatically.
+  </Step>
+</Steps>
+
+## Implementation Details
+
+The OpenAI integration is configured in `app/services/markitdown_service.py:15-24`:
+
+```python
+def _get_converter() -> MarkItDown:
+    """Return a MarkItDown instance. Uses OpenAI for image OCR if API key is set."""
+    if OPENAI_API_KEY:
+        try:
+            import openai
+            client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            return MarkItDown(mlm_client=client, mlm_model="gpt-4o-mini")
+        except Exception:
+            pass
+    return MarkItDown()
+```
+
+### Configuration Flow
+
+1. **Check for API key** in environment (from `app/config.py:8`):
+   ```python
+   OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+   ```
+
+2. **If key exists:**
+   - Import the `openai` package
+   - Create an OpenAI client with the key
+   - Pass it to MarkItDown with model `gpt-4o-mini`
+
+3. **If key is missing or import fails:**
+   - Fall back to standard MarkItDown (no AI enhancement)
+   - Text-based conversions still work perfectly
+
+<Note>
+The API gracefully degrades if the OpenAI package isn't installed or the key is invalid. You won't get errors - just no AI-enhanced image descriptions.
+</Note>
+
+## Model Selection
+
+The API uses **GPT-4o-mini** for image analysis:
+
+```python
+return MarkItDown(mlm_client=client, mlm_model="gpt-4o-mini")
+```
+
+This model is:
+- **Fast**: Low latency for image analysis
+- **Cost-effective**: Cheaper than GPT-4o or GPT-4-turbo
+- **Accurate**: Good balance of quality and speed for OCR tasks
+
+### Custom Model Configuration
+
+To use a different model, you'll need to modify the source code:
+
+```python
+# app/services/markitdown_service.py
+return MarkItDown(mlm_client=client, mlm_model="gpt-4o")  # or "gpt-4-turbo"
+```
+
+<Warning>
+Higher-tier models (GPT-4o, GPT-4-turbo) will increase your OpenAI API costs significantly.
+</Warning>
+
+## Environment Variable Reference
+
+From `.env.example`:
+
+```bash
+# Optional: OpenAI API key for AI-enhanced image OCR.
+# Without this, all text-based formats (PDF, DOCX, XLSX, etc.)
+# still convert perfectly. Only image description is skipped.
+OPENAI_API_KEY=
+```
+
+**Key points:**
+- Entirely optional
+- Only affects image/scanned document conversion
+- No impact on text-based document formats
+- No errors if omitted
+
+## Testing the Integration
+
+### Test 1: Verify Image Enhancement
+
+```bash
+# Upload an image file
+curl -X POST http://localhost:8000/api/upload \
+  -F "files=@photo.jpg" \
+  -o photo.md
+
+cat photo.md
+```
+
+**With OpenAI configured:**
+```markdown
+![photo.jpg](photo.jpg)
+
+This image shows a sunset over a mountain range with golden hour lighting...
+```
+
+**Without OpenAI:**
+```markdown
+![photo.jpg](photo.jpg)
+```
+
+### Test 2: Check Server Logs
+
+When the server starts, you'll see different behavior based on configuration:
+
+**With OpenAI key:**
+```
+INFO:     Application startup complete.
+INFO:     Using OpenAI (gpt-4o-mini) for enhanced image OCR
+```
+
+**Without OpenAI key:**
+```
+INFO:     Application startup complete.
+INFO:     OpenAI not configured - using standard MarkItDown
+```
+
+## Cost Considerations
+
+OpenAI charges for API usage based on tokens and image inputs. As of 2024:
+
+| Model | Input (per 1K tokens) | Images |
+| --- | --- | --- |
+| GPT-4o-mini | $0.00015 | ~$0.003 per image |
+| GPT-4o | $0.0050 | ~$0.01 per image |
+
+**Example costs:**
+- Converting 100 images with `gpt-4o-mini`: ~$0.30
+- Converting 100 images with `gpt-4o`: ~$1.00
+- Converting text-only PDFs: **$0** (no API calls)
+
+<Note>
+Check [OpenAI's pricing page](https://openai.com/pricing) for current rates.
+</Note>
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Never commit API keys to version control">
+    Always use `.env` files and add them to `.gitignore`:
+    
+    ```bash
+    # .gitignore
+    .env
+    .env.local
+    ```
+  </Accordion>
+  
+  <Accordion title="Use environment-specific keys">
+    Different keys for development, staging, and production:
+    
+    ```bash
+    # .env.development
+    OPENAI_API_KEY=sk-dev-key
+    
+    # .env.production
+    OPENAI_API_KEY=sk-prod-key
+    ```
+  </Accordion>
+  
+  <Accordion title="Rotate keys regularly">
+    Create new API keys periodically and revoke old ones in your OpenAI dashboard.
+  </Accordion>
+  
+  <Accordion title="Set usage limits">
+    Configure spending limits in your OpenAI account to prevent unexpected charges.
+  </Accordion>
+  
+  <Accordion title="Monitor usage">
+    Check your OpenAI dashboard regularly for usage patterns and anomalies.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### Images Not Being Described
+
+**Symptoms:** Image files convert, but no AI descriptions appear in the Markdown.
+
+**Causes:**
+
+1. **API key not set:**
+   ```bash
+   # Check if the variable is set
+   echo $OPENAI_API_KEY
+   ```
+
+2. **Invalid API key:**
+   ```bash
+   # Test the key directly
+   curl https://api.openai.com/v1/models \
+     -H "Authorization: Bearer $OPENAI_API_KEY"
+   ```
+
+3. **OpenAI package not installed:**
+   ```bash
+   pip install openai
+   ```
+
+4. **Server not restarted after configuration:**
+   ```bash
+   # Restart to pick up new environment variables
+   uvicorn app.main:app --reload
+   ```
+
+### Authentication Errors
+
+**Error in logs:**
+```
+AuthenticationError: Incorrect API key provided
+```
+
+**Solutions:**
+- Verify the key starts with `sk-`
+- Check for extra spaces or quotes in `.env`:
+  ```bash
+  # Correct
+  OPENAI_API_KEY=sk-abc123
+  
+  # Wrong
+  OPENAI_API_KEY="sk-abc123"  # Remove quotes
+  OPENAI_API_KEY= sk-abc123   # Remove space
+  ```
+- Regenerate the key in OpenAI dashboard
+
+### Rate Limit Errors
+
+**Error:**
+```
+RateLimitError: You exceeded your current quota
+```
+
+**Solutions:**
+- Check your OpenAI billing and usage limits
+- Upgrade your OpenAI plan
+- Reduce concurrent image conversion requests
+
+## Disabling AI Enhancement
+
+To disable AI-enhanced OCR:
+
+```bash
+# Remove or comment out the API key in .env
+# OPENAI_API_KEY=sk-abc123
+
+# Or unset the environment variable
+unset OPENAI_API_KEY
+
+# Restart the server
+uvicorn app.main:app --reload
+```
+
+The API will continue to work perfectly for all text-based documents.
+
+## When to Enable AI Enhancement
+
+<Tabs>
+  <Tab title="Enable If You...">
+    - Convert many image files to Markdown
+    - Process scanned PDFs regularly
+    - Need detailed image descriptions
+    - Want to extract text from screenshots
+    - Have an OpenAI account with available credits
+  </Tab>
+  
+  <Tab title="Skip If You...">
+    - Only convert text-based documents (DOCX, XLSX, text PDFs)
+    - Don't have an OpenAI account
+    - Want to minimize external API dependencies
+    - Are concerned about sending images to third parties
+    - Want to keep costs at zero
+  </Tab>
+</Tabs>
+
+## Privacy Considerations
+
+When AI enhancement is enabled:
+
+<Warning>
+**Images are sent to OpenAI's servers** for processing. Ensure this complies with your:
+- Data privacy policies
+- Regulatory requirements (GDPR, HIPAA, etc.)
+- Client confidentiality agreements
+</Warning>
+
+If you handle sensitive images:
+1. Review [OpenAI's data usage policies](https://openai.com/policies/usage-policies)
+2. Consider disabling AI enhancement for sensitive documents
+3. Use environment-based configuration to enable/disable per deployment
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Converting to Markdown" icon="file-import" href="/guides/converting-to-markdown">
+    Learn how to use the upload endpoint with your new AI-enhanced setup
+  </Card>
+  <Card title="Configuration Reference" icon="gear" href="/deployment/configuration">
+    Explore other configuration options for the API
+  </Card>
+</CardGroup>

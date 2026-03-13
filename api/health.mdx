@@ -1,0 +1,177 @@
+---
+title: 'GET /health'
+description: 'API health check endpoint'
+api: 'GET /health'
+---
+
+## Overview
+
+The `/health` endpoint provides a simple health check to verify that the API is running and responding to requests.
+
+## Endpoint
+
+```
+GET /health
+```
+
+## Request
+
+This endpoint does not require any parameters or authentication.
+
+### Request Example
+
+<CodeGroup>
+
+```bash cURL
+curl http://localhost:8000/health
+```
+
+```python Python
+import requests
+
+response = requests.get("http://localhost:8000/health")
+data = response.json()
+print(data)
+```
+
+```javascript JavaScript (fetch)
+const response = await fetch('http://localhost:8000/health');
+const data = await response.json();
+console.log(data);
+```
+
+```javascript JavaScript (axios)
+import axios from 'axios';
+
+const response = await axios.get('http://localhost:8000/health');
+console.log(response.data);
+```
+
+</CodeGroup>
+
+## Response
+
+### Response Body
+
+<ResponseField name="status" type="string">
+  Always returns `"ok"` when the API is healthy and operational
+</ResponseField>
+
+### Response Example
+
+```json
+{
+  "status": "ok"
+}
+```
+
+## Status Codes
+
+<ResponseField name="200" type="Success">
+  API is healthy and operational
+</ResponseField>
+
+## Implementation Details
+
+The health endpoint is defined in app/main.py:37-39:
+
+```python
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+```
+
+## Use Cases
+
+### Container Health Checks
+
+Use in Docker or Kubernetes health probes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+### Load Balancer Checks
+
+Configure your load balancer to ping this endpoint:
+
+```nginx
+upstream api {
+  server api1:8000;
+  server api2:8000;
+}
+
+location /health {
+  proxy_pass http://api/health;
+}
+```
+
+### Monitoring and Alerting
+
+Poll the endpoint periodically to monitor uptime:
+
+```python
+import requests
+import time
+
+while True:
+    try:
+        response = requests.get("http://localhost:8000/health", timeout=5)
+        if response.status_code == 200 and response.json()["status"] == "ok":
+            print("✓ API is healthy")
+        else:
+            print("✗ API returned unexpected response")
+    except Exception as e:
+        print(f"✗ API is unreachable: {e}")
+    
+    time.sleep(60)  # Check every minute
+```
+
+### Startup Verification
+
+Wait for the API to be ready before running tests:
+
+```bash
+#!/bin/bash
+# wait-for-api.sh
+
+echo "Waiting for API to be ready..."
+until curl -f http://localhost:8000/health > /dev/null 2>&1; do
+  echo "API not ready, waiting..."
+  sleep 2
+done
+echo "API is ready!"
+```
+
+### Integration Testing
+
+Verify API connectivity in test setup:
+
+```python
+import pytest
+import requests
+
+@pytest.fixture(scope="session", autouse=True)
+def verify_api():
+    """Ensure API is running before tests."""
+    response = requests.get("http://localhost:8000/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+```
+
+## Notes
+
+- This is a lightweight endpoint that doesn't perform deep health checks
+- It only verifies that the FastAPI application is running
+- It does not validate:
+  - Pandoc installation or functionality
+  - Template availability
+  - OpenAI API connectivity
+  - File system access
+- For comprehensive health checks, combine with `/convert/templates` endpoint
+- No rate limiting is applied to this endpoint

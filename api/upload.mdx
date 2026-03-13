@@ -1,0 +1,202 @@
+---
+title: 'POST /upload'
+description: 'Convert one or more files to Markdown'
+api: 'POST /upload'
+---
+
+## Overview
+
+The `/upload` endpoint converts one or more files to Markdown format using the MarkItDown library. It automatically detects the file type and applies the appropriate conversion strategy.
+
+## Endpoint
+
+```
+POST /upload
+```
+
+## Request
+
+### Content Type
+
+```
+multipart/form-data
+```
+
+### Parameters
+
+<ParamField body="files" type="file[]" required>
+  One or more files to convert to Markdown. Each file must be under the configured size limit (default: 50 MB).
+  
+  Supported file types include:
+  - PDF documents
+  - Microsoft Office files (Word, Excel, PowerPoint)
+  - Images (with optional OCR)
+  - Text files
+  - HTML files
+  - And more (see MarkItDown documentation)
+</ParamField>
+
+### Request Example
+
+<CodeGroup>
+
+```bash Single File
+curl -X POST http://localhost:8000/upload \
+  -F "files=@document.pdf" \
+  -o output.md
+```
+
+```bash Multiple Files
+curl -X POST http://localhost:8000/upload \
+  -F "files=@document1.pdf" \
+  -F "files=@document2.docx" \
+  -F "files=@presentation.pptx" \
+  -o output.zip
+```
+
+```bash Excel with Multiple Sheets
+curl -X POST http://localhost:8000/upload \
+  -F "files=@spreadsheet.xlsx" \
+  -o output.zip
+```
+
+```python Python
+import requests
+
+url = "http://localhost:8000/upload"
+
+# Single file
+with open("document.pdf", "rb") as f:
+    files = {"files": f}
+    response = requests.post(url, files=files)
+    
+with open("output.md", "wb") as f:
+    f.write(response.content)
+
+# Multiple files
+with open("doc1.pdf", "rb") as f1, open("doc2.docx", "rb") as f2:
+    files = [("files", f1), ("files", f2)]
+    response = requests.post(url, files=files)
+    
+with open("output.zip", "wb") as f:
+    f.write(response.content)
+```
+
+```javascript JavaScript (fetch)
+const formData = new FormData();
+formData.append('files', fileInput.files[0]);
+
+const response = await fetch('http://localhost:8000/upload', {
+  method: 'POST',
+  body: formData
+});
+
+const blob = await response.blob();
+const url = window.URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = 'output.md';
+a.click();
+```
+
+</CodeGroup>
+
+## Response
+
+### Response Behavior
+
+The endpoint returns different content types based on the input:
+
+- **Single file, single sheet**: Returns a `.md` file with `text/markdown` content type
+- **Single Excel file with multiple sheets**: Returns a `.zip` archive containing one `.md` file per sheet
+- **Multiple files**: Returns a `.zip` archive containing one `.md` file per input file
+
+### Response Headers
+
+<ResponseField name="Content-Type" type="string">
+  Either `text/markdown` or `application/zip` depending on the number of output files
+</ResponseField>
+
+<ResponseField name="Content-Disposition" type="string">
+  Attachment header with the output filename (e.g., `attachment; filename="document.md"` or `attachment; filename="converted.zip"`)
+</ResponseField>
+
+### Response Body
+
+The response body contains the raw file content (Markdown or ZIP archive).
+
+#### Single Markdown File Example
+
+```markdown
+# Document Title
+
+This is the converted content from your document.
+
+## Section 1
+
+Paragraph text here...
+```
+
+#### ZIP Archive Structure
+
+When multiple files are returned:
+
+```
+converted.zip
+├── document1.md
+├── document2.md
+└── presentation.md
+```
+
+## Status Codes
+
+<ResponseField name="200" type="Success">
+  File(s) successfully converted to Markdown
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  No files provided in the request
+  
+  ```json
+  {
+    "detail": "No files provided"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="413" type="Payload Too Large">
+  One or more files exceed the maximum upload size
+  
+  ```json
+  {
+    "detail": "File 'document.pdf' exceeds the 50 MB limit"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Conversion failed due to an internal error
+  
+  ```json
+  {
+    "detail": "Error message from conversion service"
+  }
+  ```
+</ResponseField>
+
+## Implementation Details
+
+### File Size Validation
+
+Each uploaded file is validated against the configured `MAX_UPLOAD_BYTES` limit (default: 50 MB). The validation occurs at app/routers/convert_to_md.py:22-31 before conversion begins.
+
+### Conversion Service
+
+The actual conversion is handled by the `convert_files_to_markdown` service, which uses the MarkItDown library to process files and generate Markdown output.
+
+## Notes
+
+- File type detection is automatic based on file extension and content
+- For Excel files, each sheet is converted to a separate Markdown file
+- Image-heavy documents may benefit from OCR if the OpenAI API key is configured
+- The endpoint preserves the original filename stem in the output
