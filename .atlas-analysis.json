@@ -1,0 +1,80 @@
+{
+  "projectType": "api-service",
+  "projectName": "MarkItDown API",
+  "projectDescription": "FastAPI service for converting documents to/from Markdown with support for DOCX, PPTX, PDF, Excel, and HTML formats",
+  "theme": "aspen",
+  "primaryColor": "#2563eb",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/converting-to-markdown",
+              "guides/converting-from-markdown",
+              "guides/custom-templates",
+              "guides/ai-enhanced-ocr"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/azure",
+              "deployment/configuration"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/overview",
+              "api/upload",
+              "api/convert",
+              "api/templates",
+              "api/health"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "api/errors",
+              "api/file-size-limits",
+              "api/supported-formats"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Convert PDF, DOCX, PPTX, Excel, and other formats to Markdown",
+    "Convert Markdown to DOCX, PPTX, or HTML with custom templates",
+    "Multi-sheet Excel conversion with automatic table formatting",
+    "Optional AI-enhanced image OCR using OpenAI GPT-4",
+    "Docker and Azure Container Apps deployment support",
+    "Configurable file size limits and CORS settings"
+  ],
+  "publicApiSurface": [
+    "POST /upload - Convert files to Markdown",
+    "POST /convert - Convert Markdown to DOCX/PPTX/HTML",
+    "GET /convert/templates - List available default templates",
+    "GET /health - Health check endpoint"
+  ]
+}
